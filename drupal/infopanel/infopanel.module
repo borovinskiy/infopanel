@@ -34,8 +34,8 @@ function infopanel_menu() {
 
 
         $items['infopanel/random/public/fullscreen/browser'] = array(         // просмотр случайного ТВ на полный экран браузера
-                'title' => 'Информационная панель ПГУ',
-                'description' => 'Просмотр случайной информации ПГУ',
+                'title' => 'Информационная панель',
+                'description' => 'Просмотр случайной информации',
                 'page callback' => 'show_fullscreen_browser_public_infopanel',
                 'access arguments' => array('show infopanel'),
                 'type' => MENU_CALLBACK,
