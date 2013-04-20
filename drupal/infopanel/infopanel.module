@@ -1,0 +1,664 @@
+<?php 
+
+// Author: Arsen I. Borovinskii 
+// arsen-borovinskiy.blogspot.com
+
+
+function infopanel_permission() {
+  return array(
+    'show infopanel' => array('title'=>'Просмотр информации на панели','Пользователи могут смотреть информацию на панели'),
+    'show page infoblock' => array('title'=>'Смотреть рекламный блок','description'=>'Просмотр случайной страницы'),
+    'show any user pages' => array('title'=>'Смотреть страницы пользователя','description'=>'Просмотр материалов, созданных любым пользователем'),
+  );
+}
+
+function infopanel_menu() {
+
+
+
+        $items['infopanel/random'] = array(         // просмотр случайного ТВ
+        //        'title' => 'Информационная панель',
+                'description' => 'Просмотр случайной информации',
+                'page callback' => 'show_infopanel_infopanel',
+                'access arguments' => array('show infopanel'),
+                'type' => MENU_CALLBACK,
+        );
+
+        $items['infopanel/random/public/browser'] = array(         // просмотр случайного ТВ. Также можно задать параметр ?format=json, чтобы получить ссылку на следующий файл в формате json без всего остального
+          //      'title' => 'Информационная панель',
+                'description' => 'Просмотр случайной информации',
+                'page callback' => 'show_browser_public_infopanel',
+                'access arguments' => array('show infopanel'),
+                'type' => MENU_CALLBACK,
+        );
+
+
+        $items['infopanel/random/public/fullscreen/browser'] = array(         // просмотр случайного ТВ на полный экран браузера
+                'title' => 'Информационная панель ПГУ',
+                'description' => 'Просмотр случайной информации ПГУ',
+                'page callback' => 'show_fullscreen_browser_public_infopanel',
+                'access arguments' => array('show infopanel'),
+                'type' => MENU_CALLBACK,
+        );
+
+
+
+        $items['tv/random'] = array(         // просмотр случайного ТВ
+                'title' => 'Infopanel TV',
+                'description' => 'Просмотр случайного ТВ',
+                'page callback' => 'show_random_tv_infopanel',
+                'access arguments' => array('show tv'),
+                'type' => MENU_CALLBACK,
+        );
+
+        $items['vlctv/random'] = array(         // просмотр случайного ТВ по VLC
+                'title' => 'Infopanel TV',
+                'description' => 'Просмотр случайного ТВ',
+                'page callback' => 'show_random_tv_vlc_infopanel',
+                'access arguments' => array('show tv'),
+                'type' => MENU_CALLBACK,
+        );
+
+
+        $items['infopanel/infoblock/random'] = array(         // просмотр случайного ТВ
+                'title' => 'random page FullHD',
+                'description' => 'Просмотр случайной страницы FullHD',
+                'page callback' => 'show_random_infoblock_infopanel',
+                'access arguments' => array('show page infoblock'),
+                'type' => MENU_CALLBACK,
+        );
+
+
+
+	$items['infopanel/userpages/%'] = array(
+                'title' => 'Материалы пользователя',
+                'description' => 'Материалы, опубликованные пользователем',
+                'page callback' => 'show_userpages_infopanel',
+		'page arguments' => array(2),
+                'access arguments' => array('show any user pages'),
+                'type' => MENU_CALLBACK,
+	);
+
+        return $items;
+}
+
+// hook_cron implementation
+function infopanel_cron() {
+  $query = db_query("SELECT * FROM {field_data_field_date_unpublish} AS u INNER JOIN {node} AS n WHERE n.nid = u.entity_id AND n.vid = u.revision_id AND n.status='1' AND u.field_date_unpublish_value < NOW()");
+  foreach ($query as $res) {
+    if (isset($res->nid)) {
+      db_update("node")->condition('nid',$res->nid)->fields(array('status'=>'0'))->execute();
+      watchdog("infopanel","Срок публикации ноды ':nid' истек и она снята с публикации",array(':nid'=>$res->nid),WATCHDOG_INFO);
+    }
+  }
+}
+
+// показывает материалы, созданные конкретным пользователем
+function show_userpages_infopanel($uid=0) {
+  global $user;
+  global $base_url;
+  if ( !is_numeric($uid) or $uid == 0) {
+    $uid = $user->uid;
+  }
+  $account = user_load($uid);
+  if (!isset($account->uid) or ($account->uid < 1)) {
+    return 'Пользователь не найден';				// Пользователя с таким uid не существует или это анонимный пользователь
+  }
+
+  $nodes = array();			// массив для хранения нод пользователя
+  $output = '';
+
+  $result = db_query("SELECT nid, title, status, type FROM {node} WHERE uid = :uid ORDER BY changed DESC",array(':uid'=>$uid));
+  while ( $res = $result->fetchObject() ) {					// собираем в массив nodes ноды и их загаловки для пользователя $uid
+    $nodes[] = array('nid'=>$res->nid,'title'=>$res->title, 'status'=>$res->status,'type'=>$res->type);
+  }
+
+  // темизируем вывод
+  foreach ($nodes as $node) {
+    if ( $node['status'] == 0 ) {				// отметим то, что снято с публикации 
+      $node_status = '(снято с публикации)'; 
+    }
+    else { 
+      $node_status = '';
+    }
+    $output .= '<li><a href="'.$base_url.'/node/'.$node['nid'].'">'.check_plain($node['title']).'</a> '.$node['type'].' '.$node_status.'</li>';
+  }
+  if (strlen($output)>0) { $output = '<ul>'.$output.'</ul>'; }
+  else { $output = 'У пользователя '.$account->name.' нет статей.'; }
+  
+  return $output;
+
+}
+
+
+// Эта функция является почти полным клоном show_infopanel_infopanel. Отличается от нее тем, что эта функия предназначеня для публичного показа видео, в то время как та функция только для приватных infopanel. Отличия заключаются в передачи в функцию get_random_nodes(true) параметра true - указывающего показывать только публичные фильмы
+function show_browser_public_infopanel() {
+  global $base_url;
+
+  if (isset($_REQUEST['format']) && $_REQUEST['format'] == 'json') {   // Получаем формат, в котором надо выводить данные. Если формат не задан, то выводим обычную http-страницу
+    $format = 'json';
+  }
+
+  drupal_add_css(drupal_get_path('module','infopanel').'/css/block.css','module');
+  drupal_add_css(drupal_get_path('module','infopanel').'/css/panel.css','module');
+  $output = '';
+  $output .= '<script>jQuery(document).ready(function(){ jQuery("body").css("overflow","hidden");})</script>';
+  $nid = get_random_nodes(true);
+  if ( $nid ) {
+  
+    $node = node_load($nid);
+
+    if (isset($format) && $format == 'json') {		// Если не требуется выводить всю страницу, а хочется только ссылку на виде (но не на презентацию), то выведем ссылку на видео или выведем false в формате json
+      if (isset($node->field_tvfile['und'][0]['value']) && strlen($node->field_tvfile['und'][0]['value'])>0 && valid_url($node->field_tvfile['und'][0]['value'])) {        
+        $tvfile = $node->field_tvfile['und'][0]['value'];
+        if (isset($node->field_tvfile_mp4['und'][0]['value']) && strlen($node->field_tvfile_mp4['und'][0]['value'])>0 && valid_url($node->field_tvfile_mp4['und'][0]['value'])) {
+          $tvfile_mp4 = $node->field_tvfile_mp4['und'][0]['value'];
+          drupal_json_output(array("url"=>$tvfile,"url_mp4"=>$tvfile_mp4));
+        }
+        else {
+          drupal_json_output(array("url"=>$tvfile));  
+        }
+      }
+      else { drupal_json_output(false); }
+      exit; 
+    }
+
+    switch ($node->type) {
+      case 'tv':
+      //  drupal_add_js(drupal_get_path('module', 'infopanel') .'/js/jquery.srt.js');             // добавляем скрипт для вывода субтитров
+        $output .= show_random_tv_infopanel($nid);
+        break;
+    }
+    return  html_javascript_nextnoderandomrun_infopanel($base_url."/infopanel/random/public/browser").'<div id="infopanel"><div id="slide-container">'.$output.'</div></div>';
+  }
+
+  // если нода зависнет в течении 1000 секунд, мы полностью перегрузим страницу.
+  $output .= '<script type=text/javascript>
+          setTimeout("ErrorNodeRandomReload();", 1000000)
+          function ErrorNodeRandomReload() {
+            if (typeof NextNodeRandomRun == "function") {
+               NextNodeRandomRun();
+            }
+            else {
+              document.location.href = "'.$base_url.'/infopanel/random";
+            }
+          }
+          </script>';
+
+    // если найти ноду не получилось, то просто возвращаем вызов функции
+    return $output.'<script type=text/javascript>
+           if (typeof NextNodeRandomRun == "function") {
+           NextNodeRandomRun();
+           }
+           </script><div id="infopanel"><div id="slide"></div></div>';
+
+
+}
+
+
+
+
+// просмотр случайного сообщения на информационной панели
+
+function show_infopanel_infopanel() {
+
+  global $base_url;
+
+  drupal_add_css(drupal_get_path('module','infopanel').'/css/block.css','module');
+  drupal_add_css(drupal_get_path('module','infopanel').'/css/panel.css','module');
+
+  $output = '';
+  $output .= '<script>jQuery(document).ready(function(){ jQuery("body").css("overflow","hidden");})</script>';            // убираем со страницы скролл
+
+  $nid = get_random_nodes();
+
+  if ( $nid ) {
+  $node = node_load($nid);
+    switch ($node->type) {
+      case 'tv':
+    //    drupal_add_js(drupal_get_path('module', 'infopanel') .'/js/jquery.srt.js');             // добавляем скрипт для вывода субтитров
+        $output .= show_random_tv_infopanel($nid);
+        break;
+    }
+    return  html_javascript_nextnoderandomrun_infopanel().'<div id="infopanel"><div id="slide-container">'.$output.'</div></div>';
+  }
+
+  // если нода зависнет в течении 1000 секунд, мы полностью перегрузим страницу.
+  $output .= '<script type=text/javascript>
+          setTimeout("ErrorNodeRandomReload();", 1000000);
+          function ErrorNodeRandomReload() {
+            if (typeof NextNodeRandomRun == "function") {
+               NextNodeRandomRun();
+            }
+            else {
+              document.location.href = "'.$base_url.'/infopanel/random";
+            }
+          }
+          </script>';
+
+
+    // если найти ноду не получилось, то просто возвращаем вызов функции
+    return $output.'<script type=text/javascript>
+           if (typeof NextNodeRandomRun == "function") {
+           NextNodeRandomRun();
+           }
+           </script><div id="infopanel"><div id="slide"></div></div>';
+
+
+}
+
+// просмотр случайного ТВ
+function show_random_tv_infopanel($nid = NULL) {
+
+global $base_url;
+
+$html_error = '<div id="randomtv"></div>';      # html код, который выведем если есть ошибка.
+
+if ( is_numeric($nid) ) {                       # если nid задан, то выбираем его
+  $sql = "SELECT n.nid AS nid, n.vid AS vid, cck.field_tvfile_value AS file FROM {node} AS n INNER JOIN {field_data_field_tvfile} AS cck  WHERE n.nid = $nid AND n.nid = cck.entity_id AND n.status = 1 AND n.type = 'tv' AND cck.field_tvfile_value IS NOT NULL LIMIT 1";
+}
+else {                                          # если nid не задан в виде числа, то выбираем случайную ноду
+  $sql = "SELECT n.nid AS nid, n.vid AS vid, cck.field_tvfile_value AS file FROM {node} AS n INNER JOIN {field_data_field_tvfile} AS cck  WHERE n.nid = cck.entity_id AND n.status = 1 AND n.type = 'tv' AND cck.field_tvfile_value IS NOT NULL  ORDER BY RAND() LIMIT 1";
+}
+// drupal_set_message("$sql");
+
+if ( ! ($result = db_query($sql)->fetchObject() ) ) { return $html_error; } // не получился запрос, ничего не найдено или другая ошибка
+$node = node_load($result->nid);
+
+if ( !valid_url($result->file) ) { drupal_set_message('Синтаксис пути до файла с видео не верен.'); return $html_error; }
+$file = $result->file;
+
+if (isset($node->field_tvfile_mp4["und"][0]["value"])) {
+  $file_mp4 = $node->field_tvfile_mp4["und"][0]["value"];
+}
+
+$script = '
+
+  <script>  
+    function isiPad(){
+      return (navigator.platform.indexOf("iPad") != -1);
+    }
+
+    function canPlayWebM() {
+      if (!!document.createElement("video").canPlayType) {
+        if (document.createElement("video").canPlayType(\'video/webm; codecs="vp8, vorbis"\')) {
+          return true;
+        }
+      }
+      return false;
+    }
+    if (!canPlayWebM()) {
+     // jQuery("#randomtv-container").css("display","none");  // uncomment for hidden on ie and safari
+    }
+
+//    if (isiPad()) {
+//      jQuery("#randomtv").html(\'<video style="width: 100%; height: 100%;" id="infopanel-random-tv" tabindex="0" controls="" autoplay src="'.$base_url.'/hls/infopanel2.m3u8" />\');
+//      jQuery("#randomtv-container").css("display","block");
+//    }
+
+    function NextNodeRandomRun() {
+      jQuery.getJSON("'.$base_url.'/infopanel/random/public/browser?format=json", function(data) { 
+        var tvfile_src_mp4 = \'\';
+        if (data.url_mp4) {
+          tvfile_src_mp4 = \'<source src="\' + data.url_mp4 + \'"/>\';
+        }       
+        jQuery("#randomtv").html(\'<video id="infopanel-random-tv" tabindex="0" autoplay="true" controls=""  onended="NextNodeRandomRun();" onerror="NextNodeRandomRun();" ><source src="\' + data.url + \'"/>\' + tvfile_src_mp4 + \'</video>\');
+        
+      });
+    }
+    NextNodeRandomRun();
+  </script>
+
+';
+
+$nodeoutput = '
+<video autoplay="autoplay" controls="" onended="NextNodeRandomRun();" onerror="NextNodeRandomRun();" src="'.$file.'" width="1280">
+<!--  <source src="'.$file.'"/>
+  <source src="'.$file_mp4.'"/> -->
+ ваш браузер не поддерживает видео </video>
+';
+
+return '<div id="randomtv">'.$nodeoutput.'</div>';
+
+}
+
+
+
+
+// просмотра случайного ТВ через плагин VLC
+function show_random_tv_vlc_infopanel() {
+
+global $base_url;
+
+$html_error = '<div id="randomtv"></div>';      # html код, который выведем если есть ошибка.
+$sql = "SELECT n.nid AS nid, n.vid AS vid, cck.field_tvfile_value AS file FROM {node} AS n INNER JOIN {field_data_field_tvfile} AS cck  WHERE n.nid = cck.entity_id AND n.status = 1 AND n.type = 'tv' AND cck.field_tvfile_value IS NOT NULL ORDER BY RAND() LIMIT 1";
+if ( ! ($result = db_query($sql)->fetchObject() ) ) { return $html_error; } // не получился запрос, ничего не найдено или другая ошибка
+$node = node_load($result->nid);
+
+if ( !valid_url($result->file) ) { drupal_set_message('Синтаксис пути до файла с видео не верен.'); return $html_error; }
+$file = $result->file;
+
+$nodeoutput = '
+
+ <script language="javascript">
+
+function play(tgt,uri) {
+    if (document.all) tgt += "_IE"
+    var vlctgt = tgt;
+    var tgt = document.getElementById(tgt);
+
+    if (document.all) tgt.playlist.add(uri,uri, new Array());
+    else     tgt.playlist.add(uri,uri, "");
+
+    tgt.playlist.play();
+
+    VlcPlayIntervalId = setInterval( function () { vlcnext(vlctgt); },3000);
+}
+function vlcnext(tgt) {
+
+    var tgt = document.getElementById(tgt);
+
+    if ( !tgt.playlist.isPlaying ) {
+      clearInterval(VlcPlayIntervalId);
+      if (typeof NextNodeRandomRun == "function") {
+        NextNodeRandomRun();
+      }
+      else {
+        alert("call redirect");
+        document.location.href = "'.$base_url.'/infopanel/random";
+      }
+    }
+
+}
+
+function reload() {
+    document.body.innerHTML="";
+    setTimeout("document.location.reload();", 500);
+}
+
+
+function tvmute(tgt) {
+        if (document.all) tgt += "_IE"
+        var tgt = document.getElementById(tgt);
+        var tv_volume = tgt.audio.toggleMute();
+}
+
+
+  function NextNodeRandomRun() {
+    document.location.href = "'.$base_url.'/vlctv/random";
+  }
+
+</script><p>
+<body leftmargin="0" topmargin="0" bgcolor="#000000"></body></p>
+
+<OBJECT id="vlc1_IE" height=720  width=1280 classid=clsid:9BE31822-FDAD-461B-AD51-BE1D1C159921>
+<embed type="application/x-vlc-plugin" pluginspage="'.drupal_get_path('module','infopanel').'/vlc/axvlc.dll" version="VideoLAN.VLCPlugin.2"
+    width="1280"
+    height="720"
+    id="vlc1">
+</embed>
+</object><script language="javascript">
+play(\'vlc1\',\''.$file.'\');
+
+</script><table>
+<tr>
+<td height=3></td>
+</tr>
+<tr>
+<td><a title="Звук вкл/откл" onClick="tvmute(\'vlc1\')">"Звук вкл/откл"</a></td>
+</tr>
+</table>
+';
+
+return '<div id="randomtv">'.$nodeoutput.'</div>';
+
+}
+
+
+// просмотр случайной страницы infoblock с новостями
+function show_random_infoblock_infopanel() {
+
+$sql = "SELECT nid FROM {node} WHERE status = 1 AND type = 'infoblock' ORDER BY RAND() LIMIT 1";
+$nid = db_query($sql)->fetchObject()->nid;
+$node = node_load($nid);
+if ($node->nid)
+{
+//$nodeoutput = node_view($node, $teaser = true, $page = TRUE, $links = FALSE);
+  $nodeoutput = node_view($node);
+}
+
+return '<div id="randomnode">'.$nodeoutput['body']['#items']['0']['safe_value'].'</div>';
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// функция получения случайной ноды согласно коэффициентам распределения
+function get_random_nodes($public=false) {
+  global $base_url;
+// fixme сделать нормлаьный запрос
+  if ($public) {	// Если запрашивается публичный файл, то заберем еще поле с ссылкой на файл, чтобы потом проанализировать является ли файл публичным по его url
+    $sql = "SELECT n.nid AS nid, n.vid AS vid, f.field_frequency_value AS frequency, v.field_tvfile_value AS file FROM {node} AS n INNER JOIN {field_data_field_frequency} AS f INNER JOIN {field_data_field_tvfile} AS v WHERE f.field_frequency_value > 0 AND f.entity_id = n.nid AND f.revision_id = n.vid AND n.status = 1 AND ( n.type = 'tv' ) AND n.nid = v.entity_id AND n.vid = v.revision_id ORDER BY nid ";
+  }
+  else {
+     $sql = "SELECT n.nid AS nid, n.vid AS vid, f.field_frequency_value AS frequency FROM {node} AS n INNER JOIN {field_data_field_frequency} AS f WHERE f.field_frequency_value > 0 AND f.entity_id = n.nid AND f.revision_id = n.vid AND n.status = 1 AND ( n.type = 'tv' ) ORDER BY nid ";
+  }
+  $res = db_query($sql);  
+
+  $node_array = array();                        // массив в котором ключ - это nid, а значение - это частотка (вес) показа
+  while ( $nodes = $res->fetchObject() ) {    // проходим по каждой ноде с ненулевым весом.
+
+    if ($public) {	// Если нам нужны только публичные файлы, то отсеем не нужное
+       if (!strstr($nodes->file,$base_url."/sites/default/files/")) {	// то добавим в список только если url файла не начинатеся на url данного сайта, т.е. файл лежит не на сайте infopanel
+         $node_array[$nodes->nid] = $nodes->frequency;
+       }
+    }
+    else {
+//drupal_set_message("всего ноды в списке: $nodes->nid $nodes->frequency");
+    $node_array[$nodes->nid] = $nodes->frequency;
+    }
+  }
+
+  $maxsum = 0;          // максимальная сумма весов всех нод
+  foreach (  $node_array AS $key => $value ) {
+    $maxsum = $maxsum + $value;
+  }
+
+
+  // теперь у нас есть хеш-массив с ключами в виде nid и значениями в виде веса ноды и в maxsum лежит сумма весов всех нод
+  // теперь просто выберем случайное число на от 0 до maxsum и таким образом сможем потом вычислить ноду.
+  $random = rand(1,$maxsum);
+//drupal_set_message("random число выбрано: $random при максимальном $maxsum");
+  $sum = 0;     // инициализируем переменную для подсчета
+  $nid_random = 0; // это будет nid случайной ноды, но уже с учетом ее веса, которае и вернет наша функция.
+  foreach ( $node_array AS $key => $value ) {
+//drupal_set_message("делаем второй проход: sum: $sum value: $value random: $random sum+lvalue: $sum+$value");
+    if ( $sum + $value >= $random ) { $nid_random = $key; break; }      // если мы досчитали до нужного нам случайного числа, то возвращаем нашу ноду.
+    $sum = $sum + $value;       // иначе прибавляем вес  ноды к текущему весу
+  }
+  if ( is_numeric($nid_random) and $nid_random > 0 ) { return $nid_random; }
+  return false;
+}
+
+
+
+//############################################################
+// функции печати javascript
+
+// функция javascript, которая загружает в div #slide новую ноду по адресу infopanel/random
+function html_javascript_nextnoderandomrun_infopanel($url=false) {
+  global $base_url;
+
+  if ($url == false) {
+    $url = $base_url.'/infopanel/random';
+  }
+
+  $output = '<script>
+    function NextNodeRandomRun() {
+      clearTimeout(InfopanelPlayTimerHandler);							// Сбрасываем счетчик
+      InfopanelPlayTimerHandler = setTimeout("ErrorNodeRandomReload();", 600000);
+
+      jQuery.getJSON("'.$base_url.'/infopanel/random/public/browser?format=json", function(data) {
+        var tvfile_src_mp4 = \'\';
+        if (data.url_mp4) {
+          tvfile_src_mp4 = \'<source src="\' + data.url_mp4 + \'"/>\';
+        }
+        jQuery("#randomtv").html(\'<video id="infopanel-random-tv" tabindex="0" autoplay="true" controls=""  onended="NextNodeRandomRun();" onerror="NextNodeRandomRun();" ><source src="\' + data.url + \'"/>\' + tvfile_src_mp4 + \'</video>\');
+
+      });
+
+
+
+      // эта штука загружала раньше сразу кусок страницы. На этом куске могло быть видео, слайдшоу и все что угодно. Но, сейчас, будем загружать только видео, заменив этот вызов на jQuery.getJSON (см его выше)
+      //jQuery("#columns").parent().load("'.$url.' #columns", function(responce,status,xhr) {
+      //  if (status == "error") { 
+      //    setTimeout("NextNodeRandomRun();",5000); 
+      //  }
+      //  else {
+      //    jQuery("div.content-style").css("background-color","#000000"); 
+      //  }
+      //});
+
+
+    }
+  </script>';
+
+
+  // если нода зависнет в течении 1000 секунд, мы полностью перегрузим страницу.
+  $output .= '<script type=text/javascript>
+          var InfopanelPlayTimerHandler  = setTimeout("ErrorNodeRandomReload();", 600000);	// Взводим счетчит зависания воспроизведения
+          function ErrorNodeRandomReload() {
+            if (typeof NextNodeRandomRun == "function") {
+               NextNodeRandomRun();
+            }
+            else {
+              document.location.href = "'.$base_url.'/infopanel/random";
+            }
+          }
+          </script>';
+
+  return $output;
+}
+
+// функция javascript, которая проверяет существует ли на данной странице функция nextnoderandomrun и если существует, то вызывает ее.
+function html_javascript_call_nextnoderandomrun_infopanel() {
+  $output = '
+    <script charset="UTF-8" type=text/javascript>
+      if (typeof NextNodeRandomRun == "function") {
+        NextNodeRandomRun();
+      }
+    </script>';
+  return $output;
+}
+
+
+
+// Выводит просто видео на полный экран с помощью html5
+
+function show_fullscreen_browser_public_infopanel() {
+  global $base_url;
+  $output = '<!DOCTYPE html>'."\n";
+  $output = '<html>';
+  $output .= '<head>';
+  $output .= '<meta http-equiv="Content-type" content="text/html; charset=utf-8" />';
+  $output .= '<script src="'.$base_url.'/misc/jquery.js?v=1.4.4"></script>';
+  $output .= '</head><body style="margin: 0 0 0 0;">';
+
+  $output .= '
+<div id="randomtv-container"><div id="randomtv"><video style="width: 100%; height: 100%;" id="infopanel-random-tv" /></div></div>
+<script>
+  
+   function isiPad(){
+    return (navigator.platform.indexOf("iPad") != -1);
+  }
+
+  function canPlayWebM() {
+    if (!!document.createElement("video").canPlayType) {
+      if (document.createElement("video").canPlayType(\'video/webm; codecs="vp8, vorbis"\')) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (!canPlayWebM()) {
+   // jQuery("#randomtv-container").css("display","none");  // uncomment for hidden on ie and safari
+  }
+
+//  if (isiPad()) {
+//    jQuery("#randomtv").html(\'<video style="width: 100%; height: 100%;" id="infopanel-random-tv" tabindex="0" controls="" autoplay src="http://stream.example.com/hls/infopanel.m3u8" />\');  // iPad can not play live stream    
+//    jQuery("#randomtv-container").css("display","block");
+//  }
+
+    function NextNodeRandomRun() {
+      jQuery.getJSON("'.$base_url.'/infopanel/random/public/browser?format=json", function(data) { 
+        var tvfile_src_mp4 = \'\';
+        if (data.url_mp4) {
+          tvfile_src_mp4 = \'<source src="\' + data.url_mp4 + \'"/>\';
+        }       
+        jQuery("#randomtv").html(\'<video style="width: 100%; height: 100%;"  id="infopanel-random-tv" tabindex="0" autoplay="true" controls=""  onended="NextNodeRandomRun();" onerror="NextNodeRandomRun();" ><source src="\' + data.url + \'"/>\' + tvfile_src_mp4 + \'</video>\');
+        
+      });
+    }
+  NextNodeRandomRun();
+  </script>
+';
+  $output .= '</body></html>';
+  print $output;
+  exit;
+
+
+}
+
+
+
+function infopanel_block_info() {
+  $blocks = array();
+  $blocks[0]['info'] = t('infoblock');
+  return $blocks;
+}
+
+function infopanel_block_view($delta=0) {
+  $block = array();
+  switch ($delta) {
+    case 0:
+      if (user_access("show page infoblock")) {
+        $block['subject'] = t("infoblock");
+        $block['content'] = view_content_infoblock_infopanel();
+      }
+    break;
+  }
+  return $block;
+}
+
+// view infoblock content
+function view_content_infoblock_infopanel() {
+  global $base_url;
+  $output = '
+    <div id="infopanel-bigtext"> <div id="infopanel-random-infoblock"></div> </div>
+
+    <script charset="UTF-8" type="text/javascript">  
+      InfopanelNodeFullHDpageReload();
+      setInterval("InfopanelNodeFullHDpageReload();",8000);
+      function InfopanelNodeFullHDpageReload() {
+        jQuery("#infopanel-random-infoblock").load("'.$base_url.'/infopanel/infoblock/random #randomnode");
+      }
+    </script>
+  ';
+  return $output;
+}

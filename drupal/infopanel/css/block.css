@@ -1,0 +1,23 @@
+#infopanle-bigtext p {
+  font-size: 1.7em;
+  line-height: 120%;
+}
+
+#infopanel-bigtext {
+  margin-top: 10px; 
+  line-height: 150%;
+  font-size: 150%;
+}
+
+#infopanel-bigtext ul li {
+  font-size: 1.7em;
+  line-height: 120%;
+}
+
+#infopanel-bigtext br:before {
+    display: block;
+    margin: 0 0 0 0;
+    padding: 0 0 0 0;
+    content: "";
+}
+
