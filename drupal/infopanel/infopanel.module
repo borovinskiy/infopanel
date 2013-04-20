@@ -61,7 +61,7 @@ function infopanel_menu() {
 
 
         $items['infopanel/infoblock/random'] = array(         // просмотр случайного ТВ
-                'title' => 'random page FullHD',
+                'title' => 'random page Infoblock',
                 'description' => 'Просмотр случайной страницы FullHD',
                 'page callback' => 'show_random_infoblock_infopanel',
                 'access arguments' => array('show page infoblock'),
