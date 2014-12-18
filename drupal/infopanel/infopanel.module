@@ -518,7 +518,10 @@ function html_javascript_nextnoderandomrun_infopanel($url=false) {
         var tvfile_src_mp4 = \'\';
         if (data.url_mp4) {
           tvfile_src_mp4 = \'<source src="\' + data.url_mp4 + \'"/>\';
+        } else if (!data.url) {         // returned false
+           NextNodeRandomRun();
         }
+        
         jQuery("#randomtv").html(\'<video id="infopanel-random-tv" tabindex="0" autoplay="true" controls=""  onended="NextNodeRandomRun();" onerror="NextNodeRandomRun();" ><source src="\' + data.url + \'"/>\' + tvfile_src_mp4 + \'</video>\');
 
       });
@@ -534,6 +537,20 @@ function html_javascript_nextnoderandomrun_infopanel($url=false) {
       //    jQuery("div.content-style").css("background-color","#000000"); 
       //  }
       //});
+
+      // check that video src id not undefined
+      var checkVideoInterval = setInterval(function(){
+        //console.log("check source: " + jQuery("#infopanel-random-tv").attr("currentSrc"));
+        if  (jQuery("#infopanel-random-tv").attr("currentSrc") == undefined) {
+          //console.log("video have undefined source");
+          setTimeout(function() {
+            if (jQuery("#infopanel-random-tv").attr("currentSrc") == undefined) {
+              NextNodeRandomRun();        // if video src undefined more 2 second == problem with video
+            }
+          },2000);
+        }
+      },10000);
+
 
 
     }
