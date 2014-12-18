@@ -1,6 +1,6 @@
 name = infopanel
 description = infopanel
 core = 7.x
-version = 0.1.0
+version = 0.1.1
 package = Media
 
